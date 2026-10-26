@@ -16,8 +16,11 @@ Configured with environment variables:
 | `DATA_FILE` | `/data/usage.jsonl` | |
 | `MAX_BODY_BYTES` | `65536` | |
 
+**Dashboard:** open the server's root URL (`https://usage.yourdomain.com/`) in a browser and enter any access token. It shows both 5-hour and weekly windows split by person (plus untracked use), usage per person over the last 24 hours or 7 days, the account's 5-hour limit over time, and a per-person table. The token is kept in that browser only; the page refreshes every minute.
+
 API (all `/v1/usage` calls need `Authorization: Bearer <token>`):
 
+- `GET /`: the dashboard page
 - `POST /v1/usage`: JSON object body, stored as `{"received_at","client","data"}`, where `client` is the first 8 hex chars of the token's SHA-256
 - `GET /v1/usage`: the whole file as NDJSON
 - `GET /healthz`

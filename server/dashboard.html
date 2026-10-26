@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Usage Overview</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --other: #c3c2b7;
+  --line: #52514e;
+  --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --other: #4a4a46;
+    --line: #c3c2b7;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --other: #4a4a46; --line: #c3c2b7;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 4px; }
+.sub { color: var(--ink-2); font-size: 13px; }
+.muted { color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; margin-bottom: 16px; }
+.stack { display: grid; gap: 16px; }
+.grid2 > *, .stack > * { min-width: 0; }
+.hero { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; }
+.meter { display: flex; gap: 2px; height: 12px; margin: 12px 0 10px; border-radius: 6px; overflow: hidden; background: var(--grid); }
+.meter > span { display: block; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.rows { display: grid; gap: 4px; margin-top: 8px; }
+.row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--ink-2); padding: 6px 12px; font: inherit; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--grid); color: var(--ink); font-weight: 600; }
+button.link { border: 0; background: none; color: var(--ink-2); font: inherit; cursor: pointer; text-decoration: underline; }
+.chart { position: relative; margin-top: 12px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tip {
+  position: absolute; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); white-space: nowrap; display: none; z-index: 2;
+}
+.tip .t { color: var(--ink-2); margin-bottom: 4px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--grid); }
+th { color: var(--ink-2); font-weight: 500; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+form.login { max-width: 420px; margin: 12vh auto 0; }
+form.login input { width: 100%; padding: 10px 12px; margin: 12px 0; border-radius: 8px; border: 1px solid var(--axis); background: var(--page); color: var(--ink); font: inherit; }
+form.login button { padding: 10px 16px; border-radius: 8px; border: 0; background: var(--ink); color: var(--page); font: inherit; font-weight: 600; cursor: pointer; }
+.err { color: var(--critical); margin-top: 8px; }
+.note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+
+<script>
+"use strict";
+const TOKEN_KEY = "usage-dashboard-token";
+const HOUR = 3600e3;
+const WINDOWS = { five_hour: 5 * HOUR, seven_day: 7 * 24 * HOUR };
+const SLOTS = ["var(--s1)", "var(--s2)", "var(--s3)"];
+const app = document.getElementById("app");
+let state = { rows: [], range: "24h", loadedAt: 0 };
+
+const store = {
+  get() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } },
+  set(v) { try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch {} },
+};
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ---- data ----------------------------------------------------------------
+
+// Same weighting as the plugin: limits are spent roughly in proportion to cost.
+function weight(d) {
+  const m = (d.model || "").toLowerCase();
+  const tier = m.includes("opus") ? 5 : m.includes("haiku") ? 1 : 3;
+  return tier * ((d.input || 0) + 1.25 * (d.cache_write || 0) + 0.1 * (d.cache_read || 0) + 5 * (d.output || 0));
+}
+const tokensOf = d => (d.input || 0) + (d.output || 0) + (d.cache_read || 0) + (d.cache_write || 0);
+const ts = r => Date.parse(r.data.ts || r.received_at);
+
+function calibrate(rows, kind) {
+  let sumPct = 0, sumW = 0, prev, tokens = new Map();
+  for (const r of rows) {
+    if (r.data.kind === "turn") tokens.set(r.client, (tokens.get(r.client) || 0) + weight(r.data));
+    const l = (r.data.limits || []).find(x => x.kind === kind);
+    if (!l) continue;
+    if (prev && prev.resetsAt === l.resetsAt) {
+      const delta = l.pct - prev.pct;
+      const active = [...tokens].filter(([, w]) => w > 0);
+      if (delta >= 0 && active.length === 1) { sumPct += delta; sumW += active[0][1]; }
+    }
+    prev = l;
+    tokens = new Map();
+  }
+  return sumPct >= 3 && sumW > 0 ? sumPct / sumW : undefined;
+}
+
+function analyse(rows, now) {
+  rows = rows.filter(r => r && r.data && r.data.v === 1).sort((a, b) => ts(a) - ts(b));
+  const people = new Map();
+  for (const r of rows) {
+    const p = people.get(r.client) || { client: r.client, name: "", last: 0 };
+    if (r.data.name) p.name = r.data.name;
+    p.last = Math.max(p.last, ts(r));
+    people.set(r.client, p);
+  }
+  // Stable colors: order people by first appearance, so a person keeps their slot.
+  const order = [...people.keys()];
+  order.forEach((c, i) => { const p = people.get(c); p.color = SLOTS[i] || "var(--other)"; p.label = p.name || "client " + c; });
+
+  const windows = {};
+  for (const [kind, span] of Object.entries(WINDOWS)) {
+    let latest;
+    for (let i = rows.length - 1; i >= 0 && !latest; i--) latest = (rows[i].data.limits || []).find(l => l.kind === kind);
+    if (!latest) { windows[kind] = null; continue; }
+    const resetsAt = latest.resetsAt ? Date.parse(latest.resetsAt) : now;
+    const start = resetsAt - span;
+    const turns = rows.filter(r => r.data.kind === "turn" && ts(r) >= start);
+    const per = new Map(order.map(c => [c, { w: 0, tokens: 0, turns: 0 }]));
+    for (const r of turns) { const x = per.get(r.client); x.w += weight(r.data); x.tokens += tokensOf(r.data); x.turns++; }
+    const total = [...per.values()].reduce((a, x) => a + x.w, 0);
+    const rate = calibrate(rows, kind);
+    for (const x of per.values()) x.pct = rate !== undefined ? x.w * rate : total > 0 ? (x.w / total) * latest.pct : 0;
+    let sum = [...per.values()].reduce((a, x) => a + x.pct, 0);
+    if (sum > latest.pct && sum > 0) { for (const x of per.values()) x.pct *= latest.pct / sum; sum = latest.pct; }
+    windows[kind] = { pct: latest.pct, resetsAt, per, untracked: Math.max(0, latest.pct - sum), calibrated: rate !== undefined, rate };
+  }
+  return { rows, people, order, windows };
+}
+
+// ---- formatting -----------------------------------------------------------
+
+const fmtN = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(Math.round(n));
+const fmtPct = n => (n < 10 ? n.toFixed(1) : Math.round(n)) + "%";
+function fmtIn(ms) {
+  if (ms <= 0) return "now";
+  const h = Math.floor(ms / HOUR), m = Math.floor((ms % HOUR) / 60e3);
+  return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+function fmtAgo(t, now) { const d = now - t; return d < 60e3 ? "just now" : fmtIn(d) + " ago"; }
+const fmtTime = t => new Date(t).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+
+// ---- views ---------------------------------------------------------------
+
+function renderLogin(error) {
+  app.innerHTML = `
+    <form class="login card" id="login">
+      <h1>Claude usage overview</h1>
+      <p class="sub">Enter one of the server's access tokens. It is kept in this browser only.</p>
+      <input type="password" id="tok" autocomplete="current-password" placeholder="Access token" required>
+      <button type="submit">Open dashboard</button>
+      ${error ? `<div class="err">${esc(error)}</div>` : ""}
+    </form>`;
+  document.getElementById("login").addEventListener("submit", e => {
+    e.preventDefault();
+    store.set(document.getElementById("tok").value.trim());
+    load();
+  });
+  document.getElementById("tok").focus();
+}
+
+function windowCard(title, w, a, now) {
+  if (!w) return `<section class="card"><h2>${title}</h2><p class="muted">No limit readings yet.</p></section>`;
+  const segs = a.order.map(c => ({ p: a.people.get(c), x: w.per.get(c) })).filter(s => s.x.pct > 0.05);
+  const bar = segs.map(s => `<span title="${esc(s.p.label)}: ~${fmtPct(s.x.pct)}" style="width:${s.x.pct}%;background:${s.p.color}"></span>`).join("")
+    + (w.untracked > 0.05 ? `<span title="Untracked: ~${fmtPct(w.untracked)}" style="width:${w.untracked}%;background:var(--other)"></span>` : "");
+  const rows = a.order.map(c => {
+    const p = a.people.get(c), x = w.per.get(c);
+    return `<div class="row"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:${p.color}"></i>${esc(p.label)}</span><span class="muted">${fmtN(x.tokens)} tokens · ${x.turns} turns</span><b>~${fmtPct(x.pct)}</b></div>`;
+  }).join("") + `<div class="row"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:var(--other)"></i>Untracked (chat, mobile, other)</span><span></span><b>~${fmtPct(w.untracked)}</b></div>`;
+  return `<section class="card">
+    <h2>${title}</h2>
+    <div class="hero">${fmtPct(w.pct)}</div>
+    <div class="sub">of the account limit used · resets in ${fmtIn(w.resetsAt - now)}</div>
+    <div class="meter" role="img" aria-label="${title} split by person">${bar}</div>
+    <div class="rows">${rows}</div>
+    <div class="note">${w.calibrated ? "Shares calibrated from periods when only one person was active." : "Not enough solo activity yet to calibrate: split by each person's share of tokens, assuming no untracked use."}</div>
+  </section>`;
+}
+
+function render() {
+  const now = Date.now();
+  const a = analyse(state.rows, now);
+  const span = state.range === "24h" ? 24 * HOUR : 7 * 24 * HOUR;
+  app.innerHTML = `
+    <header>
+      <div><h1>Claude usage overview</h1><div class="sub">Updated ${fmtTime(state.loadedAt)} · ${a.rows.length} samples</div></div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div class="seg" role="group" aria-label="Time range">
+          <button data-range="24h" aria-pressed="${state.range === "24h"}">24 hours</button>
+          <button data-range="7d" aria-pressed="${state.range === "7d"}">7 days</button>
+        </div>
+        <button class="link" id="logout">Sign out</button>
+      </div>
+    </header>
+    ${a.rows.length === 0 ? `<section class="card"><h2>No data yet</h2><p class="sub">Install the usage-tracker plugin, set its server URL and token, and use Claude Code. Samples appear here after the first turn.</p></section>` : `
+    <div class="grid2">${windowCard("5-hour window", a.windows.five_hour, a, now)}${windowCard("Weekly window", a.windows.seven_day, a, now)}</div>
+    <div class="stack">
+      <section class="card">
+        <h2>Usage by person</h2>
+        <div class="sub">${a.windows.five_hour && a.windows.five_hour.calibrated ? "Estimated % of the 5-hour limit" : "Cost-weighted tokens"} per ${state.range === "24h" ? "hour" : "6 hours"}</div>
+        <div class="legend" style="margin-top:8px">${a.order.map(c => `<span><i style="background:${a.people.get(c).color}"></i>${esc(a.people.get(c).label)}</span>`).join("")}</div>
+        <div class="chart" id="bars"></div>
+      </section>
+      <section class="card">
+        <h2>Account 5-hour limit</h2>
+        <div class="sub">% used, as reported to the plugins (both people and untracked use). Gaps are periods with no readings.</div>
+        <div class="chart" id="line"></div>
+      </section>
+      <section class="card">
+        <h2>People</h2>
+        <div class="scroll"><table>
+          <thead><tr><th>Person</th><th class="n">5h share</th><th class="n">Weekly share</th><th class="n">Tokens this week</th><th class="n">Turns this week</th><th>Last seen</th></tr></thead>
+          <tbody>${a.order.map(c => {
+            const p = a.people.get(c), f = a.windows.five_hour, s = a.windows.seven_day;
+            const fx = f && f.per.get(c), sx = s && s.per.get(c);
+            return `<tr><td><i style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:${p.color}"></i>${esc(p.label)} <span class="muted">${esc(c)}</span></td>
+              <td class="n">${fx ? "~" + fmtPct(fx.pct) : "–"}</td><td class="n">${sx ? "~" + fmtPct(sx.pct) : "–"}</td>
+              <td class="n">${sx ? fmtN(sx.tokens) : "–"}</td><td class="n">${sx ? sx.turns : "–"}</td><td>${fmtAgo(p.last, now)}</td></tr>`;
+          }).join("")}</tbody>
+        </table></div>
+      </section>
+    </div>`}`;
+
+  app.querySelectorAll("[data-range]").forEach(b => b.addEventListener("click", () => { state.range = b.dataset.range; render(); }));
+  document.getElementById("logout").addEventListener("click", () => { store.set(""); renderLogin(); });
+  if (a.rows.length) { drawBars(a, now, span); drawLine(a, now, span); }
+}
+
+// ---- charts --------------------------------------------------------------
+
+// Charts are drawn at their container's pixel width so text stays 11px on a phone.
+let W = 960;
+const H = 240, M = { t: 12, r: 12, b: 28, l: 44 };
+const sizeTo = host => { W = Math.max(280, Math.round(host.clientWidth)); };
+const svgEl = (tag, attrs) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+}
+
+function axes(svg, x0, x1, yMax, yFmt) {
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  for (let i = 0; i <= 5; i++) {
+    const y = M.t + ih - (ih * i) / 5;
+    svg.append(svgEl("line", { x1: M.l, x2: W - M.r, y1: y, y2: y, stroke: i ? "var(--grid)" : "var(--axis)", "stroke-width": 1 }));
+    const t = svgEl("text", { x: M.l - 8, y: y + 4, "text-anchor": "end" }); t.textContent = yFmt((yMax * i) / 5); svg.append(t);
+  }
+  const ticks = W < 560 ? 3 : 6;
+  for (let i = 0; i <= ticks; i++) {
+    const tm = x0 + ((x1 - x0) * i) / ticks;
+    const t = svgEl("text", { x: M.l + (iw * i) / ticks, y: H - 8, "text-anchor": i === 0 ? "start" : i === ticks ? "end" : "middle" });
+    t.textContent = new Date(tm).toLocaleString(undefined, x1 - x0 > 2 * 24 * HOUR ? { weekday: "short", day: "numeric" } : { hour: "2-digit", minute: "2-digit" });
+    svg.append(t);
+  }
+}
+
+function tooltip(host) {
+  const tip = document.createElement("div"); tip.className = "tip"; host.append(tip);
+  return {
+    show(html, px, py) {
+      tip.innerHTML = html; tip.style.display = "block";
+      const hw = host.clientWidth, tw = tip.offsetWidth;
+      tip.style.left = Math.min(Math.max(0, px + 12), hw - tw) + "px";
+      tip.style.top = Math.max(0, py - tip.offsetHeight - 8) + "px";
+    },
+    hide() { tip.style.display = "none"; },
+  };
+}
+
+function drawBars(a, now, span) {
+  const host = document.getElementById("bars");
+  sizeTo(host);
+  const bucket = span > 24 * HOUR ? 6 * HOUR : HOUR;
+  const x1 = Math.ceil(now / bucket) * bucket, x0 = x1 - span, n = span / bucket;
+  const rate = a.windows.five_hour && a.windows.five_hour.calibrated ? a.windows.five_hour.rate : undefined;
+  const buckets = Array.from({ length: n }, (_, i) => ({ t: x0 + i * bucket, v: new Map() }));
+  for (const r of a.rows) {
+    if (r.data.kind !== "turn") continue;
+    const i = Math.floor((ts(r) - x0) / bucket);
+    if (i < 0 || i >= n) continue;
+    const v = rate !== undefined ? weight(r.data) * rate : weight(r.data);
+    buckets[i].v.set(r.client, (buckets[i].v.get(r.client) || 0) + v);
+  }
+  const totals = buckets.map(b => [...b.v.values()].reduce((x, y) => x + y, 0));
+  const yMax = niceMax(Math.max(...totals));
+  const yFmt = rate !== undefined ? v => fmtPct(v) : v => fmtN(v);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Usage by person over time" });
+  axes(svg, x0, x1, yMax, yFmt);
+  const iw = W - M.l - M.r, ih = H - M.t - M.b, bw = iw / n, gap = Math.min(4, bw * 0.25);
+  const tip = tooltip(host);
+  buckets.forEach((b, i) => {
+    let y = M.t + ih;
+    const segs = a.order.filter(c => b.v.get(c) > 0);
+    segs.forEach((c, j) => {
+      const h = (b.v.get(c) / yMax) * ih;
+      const top = j === segs.length - 1;
+      const x = M.l + i * bw + gap / 2, w = Math.max(1, bw - gap);
+      // 2px surface gap below each stacked segment; round only the top end.
+      const g = j > 0 ? 2 : 0, y0 = y - g, hh = Math.max(0, h - g);
+      const path = top && hh > 4 && w > 8
+        ? `M${x},${y0} v${-(hh - 4)} q0,-4 4,-4 h${w - 8} q4,0 4,4 v${hh - 4} z`
+        : `M${x},${y0} v${-hh} h${w} v${hh} z`;
+      svg.append(svgEl("path", { d: path, fill: a.people.get(c).color }));
+      y -= h;
+    });
+    const hit = svgEl("rect", { x: M.l + i * bw, y: M.t, width: bw, height: ih, fill: "transparent" });
+    hit.addEventListener("pointermove", ev => {
+      const rect = host.getBoundingClientRect();
+      const lines = a.order.map(c => `<div><i style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${a.people.get(c).color}"></i>${esc(a.people.get(c).label)}: <b>${yFmt(b.v.get(c) || 0)}</b></div>`).join("");
+      tip.show(`<div class="t">${fmtTime(b.t)} – ${new Date(b.t + bucket).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</div>${lines}`, ev.clientX - rect.left, ev.clientY - rect.top);
+    });
+    hit.addEventListener("pointerleave", () => tip.hide());
+    svg.append(hit);
+  });
+  host.append(svg);
+}
+
+function drawLine(a, now, span) {
+  const host = document.getElementById("line");
+  sizeTo(host);
+  const x1 = now, x0 = now - span;
+  const pts = [];
+  for (const r of a.rows) {
+    const l = (r.data.limits || []).find(x => x.kind === "five_hour");
+    const t = ts(r);
+    if (l && t >= x0) pts.push({ t, v: l.pct });
+  }
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Account 5-hour limit used over time" });
+  axes(svg, x0, x1, 100, v => v + "%");
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const X = t => M.l + ((t - x0) / (x1 - x0)) * iw, Y = v => M.t + ih - (Math.min(v, 100) / 100) * ih;
+  if (pts.length) {
+    svg.append(svgEl("path", { d: pts.map((p, i) => `${i && p.t - pts[i - 1].t <= HOUR ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join(""), fill: "none", stroke: "var(--line)", "stroke-width": 2, "stroke-linejoin": "round" }));
+  } else {
+    const t = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle" }); t.textContent = "No readings in this range"; svg.append(t);
+  }
+  const cross = svgEl("line", { y1: M.t, y2: M.t + ih, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" });
+  const dot = svgEl("circle", { r: 4, fill: "var(--line)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" });
+  svg.append(cross, dot);
+  const tip = tooltip(host);
+  const hit = svgEl("rect", { x: M.l, y: M.t, width: iw, height: ih, fill: "transparent" });
+  hit.addEventListener("pointermove", ev => {
+    if (!pts.length) return;
+    const rect = svg.getBoundingClientRect();
+    const t = x0 + ((ev.clientX - rect.left) / rect.width * W - M.l) / iw * (x1 - x0);
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+    for (const el of [cross, dot]) el.setAttribute("visibility", "visible");
+    cross.setAttribute("x1", X(best.t)); cross.setAttribute("x2", X(best.t));
+    dot.setAttribute("cx", X(best.t)); dot.setAttribute("cy", Y(best.v));
+    const hr = host.getBoundingClientRect();
+    tip.show(`<div class="t">${fmtTime(best.t)}</div>5-hour limit used: <b>${fmtPct(best.v)}</b>`, ev.clientX - hr.left, ev.clientY - hr.top);
+  });
+  hit.addEventListener("pointerleave", () => { tip.hide(); for (const el of [cross, dot]) el.setAttribute("visibility", "hidden"); });
+  svg.append(hit);
+  host.append(svg);
+}
+
+// ---- loading -------------------------------------------------------------
+
+async function load() {
+  const token = store.get();
+  if (!token) return renderLogin();
+  let res;
+  try {
+    res = await fetch("v1/usage", { headers: { Authorization: "Bearer " + token }, cache: "no-store" });
+  } catch {
+    return renderLogin("Could not reach the server.");
+  }
+  if (res.status === 401) { store.set(""); return renderLogin("That token was not accepted."); }
+  if (!res.ok) return renderLogin(`The server answered ${res.status}.`);
+  const text = await res.text();
+  state.rows = text.split("\n").filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } });
+  state.loadedAt = Date.now();
+  render();
+}
+
+let resizeTimer;
+addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.loadedAt) render(); }, 150); });
+
+load();
+setInterval(() => { if (store.get() && document.visibilityState === "visible") load(); }, 60e3);
+</script>
+</body>
+</html>

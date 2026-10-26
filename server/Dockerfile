@@ -4,7 +4,7 @@ FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod ./
-COPY *.go ./
+COPY *.go *.html ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/usage-server . \
  && mkdir -p /out/data
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -59,6 +60,9 @@ func envOr(key, def string) string {
 	}
 	return def
 }
+
+//go:embed dashboard.html
+var dashboardHTML []byte
 
 // record is one line in the data file. Client is a short, stable hash of the
 // access token so entries can be attributed without storing the secret.
@@ -181,6 +185,16 @@ func main() {
 	s := &server{cfg: cfg, file: f}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/usage", s.handleUsage)
+	// The dashboard page is static; it asks for a token and calls /v1/usage itself.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", "text/html; charset=utf-8")
+		h.Set("Cache-Control", "no-cache")
+		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		w.Write(dashboardHTML)
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ok")
 	})
