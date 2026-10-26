@@ -19,6 +19,7 @@
   --s2: #eb6834;
   --s3: #1baf7a;
   --other: #c3c2b7;
+  --before: repeating-linear-gradient(135deg, #c3c2b7 0 2px, transparent 2px 5px);
   --line: #52514e;
   --critical: #d03b3b;
 }
@@ -37,6 +38,7 @@
     --s2: #d95926;
     --s3: #199e70;
     --other: #4a4a46;
+    --before: repeating-linear-gradient(135deg, #5a5a55 0 2px, transparent 2px 5px);
     --line: #c3c2b7;
   }
 }
@@ -45,6 +47,7 @@
   --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --other: #4a4a46; --line: #c3c2b7;
+  --before: repeating-linear-gradient(135deg, #5a5a55 0 2px, transparent 2px 5px);
 }
 * { box-sizing: border-box; }
 body {
@@ -123,21 +126,33 @@ function weight(d) {
 const tokensOf = d => (d.input || 0) + (d.output || 0) + (d.cache_read || 0) + (d.cache_write || 0);
 const ts = r => Date.parse(r.data.ts || r.received_at);
 
-function calibrate(rows, kind) {
-  let sumPct = 0, sumW = 0, prev, tokens = new Map();
+// Two readings belong to the same window when their reset times agree
+// (allowing for a little jitter); a new window resets hours later.
+const sameWindow = (a, b) => a && b && Math.abs(Date.parse(a) - Date.parse(b)) < 10 * 60e3;
+
+// Walks one limit's readings in time order. Each rise between two readings is
+// credited to whoever reported turns in between, split by cost-weighted tokens
+// when several did; a rise with no tracked turns is untracked (claude.ai chat,
+// mobile, someone without the plugin). The very first reading only sets the
+// baseline: what was used before tracking started can't be attributed.
+function attribute(rows, kind) {
+  const events = [];
+  let prev, tokens = new Map();
   for (const r of rows) {
     if (r.data.kind === "turn") tokens.set(r.client, (tokens.get(r.client) || 0) + weight(r.data));
     const l = (r.data.limits || []).find(x => x.kind === kind);
     if (!l) continue;
-    if (prev && prev.resetsAt === l.resetsAt) {
-      const delta = l.pct - prev.pct;
-      const active = [...tokens].filter(([, w]) => w > 0);
-      if (delta >= 0 && active.length === 1) { sumPct += delta; sumW += active[0][1]; }
+    if (prev) {
+      const delta = sameWindow(prev.resetsAt, l.resetsAt) ? Math.max(0, l.pct - prev.pct) : l.pct;
+      const total = [...tokens.values()].reduce((a, b) => a + b, 0);
+      const by = new Map();
+      if (total > 0) for (const [c, w] of tokens) by.set(c, (delta * w) / total);
+      events.push({ t: ts(r), resetsAt: l.resetsAt, delta, by, untracked: total > 0 ? 0 : delta });
     }
     prev = l;
     tokens = new Map();
   }
-  return sumPct >= 3 && sumW > 0 ? sumPct / sumW : undefined;
+  return events;
 }
 
 function analyse(rows, now) {
@@ -163,14 +178,26 @@ function analyse(rows, now) {
     const turns = rows.filter(r => r.data.kind === "turn" && ts(r) >= start);
     const per = new Map(order.map(c => [c, { w: 0, tokens: 0, turns: 0 }]));
     for (const r of turns) { const x = per.get(r.client); x.w += weight(r.data); x.tokens += tokensOf(r.data); x.turns++; }
-    const total = [...per.values()].reduce((a, x) => a + x.w, 0);
-    const rate = calibrate(rows, kind);
-    for (const x of per.values()) x.pct = rate !== undefined ? x.w * rate : total > 0 ? (x.w / total) * latest.pct : 0;
-    let sum = [...per.values()].reduce((a, x) => a + x.pct, 0);
-    if (sum > latest.pct && sum > 0) { for (const x of per.values()) x.pct *= latest.pct / sum; sum = latest.pct; }
-    windows[kind] = { pct: latest.pct, resetsAt, per, untracked: Math.max(0, latest.pct - sum), calibrated: rate !== undefined, rate };
+    for (const x of per.values()) x.pct = 0;
+    let untracked = 0;
+    const events = attribute(rows, kind);
+    for (const e of events) {
+      if (latest.resetsAt ? !sameWindow(e.resetsAt, latest.resetsAt) : e.t < start) continue;
+      for (const [c, v] of e.by) per.get(c).pct += v;
+      untracked += e.untracked;
+    }
+    // Readings can dip and recover, so credited rises may slightly exceed the
+    // current figure; scale down to it rather than show more than 100% of it.
+    const credited = [...per.values()].reduce((a, x) => a + x.pct, 0) + untracked;
+    if (credited > latest.pct && credited > 0) {
+      const k = latest.pct / credited;
+      for (const x of per.values()) x.pct *= k;
+      untracked *= k;
+    }
+    const before = Math.max(0, latest.pct - Math.min(credited, latest.pct));
+    windows[kind] = { pct: latest.pct, resetsAt, per, untracked, before };
   }
-  return { rows, people, order, windows };
+  return { rows, people, order, windows, fiveHourEvents: attribute(rows, "five_hour") };
 }
 
 // ---- formatting -----------------------------------------------------------
@@ -208,18 +235,20 @@ function windowCard(title, w, a, now) {
   if (!w) return `<section class="card"><h2>${title}</h2><p class="muted">No limit readings yet.</p></section>`;
   const segs = a.order.map(c => ({ p: a.people.get(c), x: w.per.get(c) })).filter(s => s.x.pct > 0.05);
   const bar = segs.map(s => `<span title="${esc(s.p.label)}: ~${fmtPct(s.x.pct)}" style="width:${s.x.pct}%;background:${s.p.color}"></span>`).join("")
-    + (w.untracked > 0.05 ? `<span title="Untracked: ~${fmtPct(w.untracked)}" style="width:${w.untracked}%;background:var(--other)"></span>` : "");
+    + (w.untracked > 0.05 ? `<span title="Untracked: ~${fmtPct(w.untracked)}" style="width:${w.untracked}%;background:var(--other)"></span>` : "")
+    + (w.before > 0.05 ? `<span title="Before tracking started: ${fmtPct(w.before)}" style="width:${w.before}%;background:var(--before)"></span>` : "");
   const rows = a.order.map(c => {
     const p = a.people.get(c), x = w.per.get(c);
     return `<div class="row"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:${p.color}"></i>${esc(p.label)}</span><span class="muted">${fmtN(x.tokens)} tokens · ${x.turns} turns</span><b>~${fmtPct(x.pct)}</b></div>`;
-  }).join("") + `<div class="row"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:var(--other)"></i>Untracked (chat, mobile, other)</span><span></span><b>~${fmtPct(w.untracked)}</b></div>`;
+  }).join("") + `<div class="row"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:var(--other)"></i>Untracked (chat, mobile, other)</span><span></span><b>~${fmtPct(w.untracked)}</b></div>`
+    + (w.before > 0.05 ? `<div class="row"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:var(--before)"></i>Before tracking started</span><span></span><b>${fmtPct(w.before)}</b></div>` : "");
   return `<section class="card">
     <h2>${title}</h2>
     <div class="hero">${fmtPct(w.pct)}</div>
     <div class="sub">of the account limit used · resets in ${fmtIn(w.resetsAt - now)}</div>
     <div class="meter" role="img" aria-label="${title} split by person">${bar}</div>
     <div class="rows">${rows}</div>
-    <div class="note">${w.calibrated ? "Shares calibrated from periods when only one person was active." : "Not enough solo activity yet to calibrate: split by each person's share of tokens, assuming no untracked use."}</div>
+    <div class="note">Each rise in the limit is credited to whoever was using Claude Code at the time, split by tokens if both were. Rises with no tracked activity count as untracked.</div>
   </section>`;
 }
 
@@ -243,8 +272,8 @@ function render() {
     <div class="stack">
       <section class="card">
         <h2>Usage by person</h2>
-        <div class="sub">${a.windows.five_hour && a.windows.five_hour.calibrated ? "Estimated % of the 5-hour limit" : "Cost-weighted tokens"} per ${state.range === "24h" ? "hour" : "6 hours"}</div>
-        <div class="legend" style="margin-top:8px">${a.order.map(c => `<span><i style="background:${a.people.get(c).color}"></i>${esc(a.people.get(c).label)}</span>`).join("")}</div>
+        <div class="sub">% of the 5-hour limit used per ${state.range === "24h" ? "hour" : "6 hours"}</div>
+        <div class="legend" style="margin-top:8px">${a.order.map(c => `<span><i style="background:${a.people.get(c).color}"></i>${esc(a.people.get(c).label)}</span>`).join("")}<span><i style="background:var(--other)"></i>Untracked</span></div>
         <div class="chart" id="bars"></div>
       </section>
       <section class="card">
@@ -320,25 +349,27 @@ function drawBars(a, now, span) {
   sizeTo(host);
   const bucket = span > 24 * HOUR ? 6 * HOUR : HOUR;
   const x1 = Math.ceil(now / bucket) * bucket, x0 = x1 - span, n = span / bucket;
-  const rate = a.windows.five_hour && a.windows.five_hour.calibrated ? a.windows.five_hour.rate : undefined;
+  const keys = [...a.order, "untracked"];
+  const colorOf = k => k === "untracked" ? "var(--other)" : a.people.get(k).color;
+  const labelOf = k => k === "untracked" ? "Untracked" : a.people.get(k).label;
   const buckets = Array.from({ length: n }, (_, i) => ({ t: x0 + i * bucket, v: new Map() }));
-  for (const r of a.rows) {
-    if (r.data.kind !== "turn") continue;
-    const i = Math.floor((ts(r) - x0) / bucket);
+  for (const e of a.fiveHourEvents) {
+    const i = Math.floor((e.t - x0) / bucket);
     if (i < 0 || i >= n) continue;
-    const v = rate !== undefined ? weight(r.data) * rate : weight(r.data);
-    buckets[i].v.set(r.client, (buckets[i].v.get(r.client) || 0) + v);
+    const v = buckets[i].v;
+    for (const [c, x] of e.by) v.set(c, (v.get(c) || 0) + x);
+    if (e.untracked) v.set("untracked", (v.get("untracked") || 0) + e.untracked);
   }
   const totals = buckets.map(b => [...b.v.values()].reduce((x, y) => x + y, 0));
   const yMax = niceMax(Math.max(...totals));
-  const yFmt = rate !== undefined ? v => fmtPct(v) : v => fmtN(v);
+  const yFmt = v => fmtPct(v);
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Usage by person over time" });
   axes(svg, x0, x1, yMax, yFmt);
   const iw = W - M.l - M.r, ih = H - M.t - M.b, bw = iw / n, gap = Math.min(4, bw * 0.25);
   const tip = tooltip(host);
   buckets.forEach((b, i) => {
     let y = M.t + ih;
-    const segs = a.order.filter(c => b.v.get(c) > 0);
+    const segs = keys.filter(c => b.v.get(c) > 0);
     segs.forEach((c, j) => {
       const h = (b.v.get(c) / yMax) * ih;
       const top = j === segs.length - 1;
@@ -348,13 +379,13 @@ function drawBars(a, now, span) {
       const path = top && hh > 4 && w > 8
         ? `M${x},${y0} v${-(hh - 4)} q0,-4 4,-4 h${w - 8} q4,0 4,4 v${hh - 4} z`
         : `M${x},${y0} v${-hh} h${w} v${hh} z`;
-      svg.append(svgEl("path", { d: path, fill: a.people.get(c).color }));
+      svg.append(svgEl("path", { d: path, fill: colorOf(c) }));
       y -= h;
     });
     const hit = svgEl("rect", { x: M.l + i * bw, y: M.t, width: bw, height: ih, fill: "transparent" });
     hit.addEventListener("pointermove", ev => {
       const rect = host.getBoundingClientRect();
-      const lines = a.order.map(c => `<div><i style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${a.people.get(c).color}"></i>${esc(a.people.get(c).label)}: <b>${yFmt(b.v.get(c) || 0)}</b></div>`).join("");
+      const lines = keys.map(c => `<div><i style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${colorOf(c)}"></i>${esc(labelOf(c))}: <b>${yFmt(b.v.get(c) || 0)}</b></div>`).join("");
       tip.show(`<div class="t">${fmtTime(b.t)} – ${new Date(b.t + bucket).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</div>${lines}`, ev.clientX - rect.left, ev.clientY - rect.top);
     });
     hit.addEventListener("pointerleave", () => tip.hide());

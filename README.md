@@ -3,7 +3,7 @@
 Track how much of a shared Claude subscription's 5-hour and weekly limits each person uses.
 
 - **`server/`**: a tiny Go server (scratch image, ~9 MB) that appends usage samples from each person to a JSON-lines file. Image: `ghcr.io/himetau/claude-usage-tracker`, built for amd64 and arm64 on every push to `main`.
-- **`plugins/usage-tracker/`**: a Claude Code plugin. It sends each turn's token counts and the account's limit readings to the server, and adds `/usage-report`, which estimates each person's share of the current windows plus untracked use (claude.ai chat, mobile).
+- **`plugins/usage-tracker/`**: a Claude Code plugin. It sends each turn's token counts and the account's limit readings to the server, and adds `/usage-report`, which credits each rise in the limit to whoever was active at the time, plus untracked use (claude.ai chat, mobile).
 
 ## Server
 
@@ -43,4 +43,4 @@ claude plugin install usage-tracker --marketplace himetau/claude-usage-tracker
 
 In the desktop app: click + next to the prompt box, then Plugins, Add marketplace with `himetau/claude-usage-tracker`, then Add plugin.
 
-Then set `server_url`, `access_token` (your own token) and optionally `display_name`. See [the plugin README](plugins/usage-tracker/README.md) for how the split is estimated.
+Then set `server_url`, `access_token` (your own token) and optionally `display_name`. See [the plugin README](plugins/usage-tracker/README.md) for how the split is worked out.

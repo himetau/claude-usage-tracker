@@ -1,6 +1,6 @@
 {
   "name": "usage-tracker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reports this machine's Claude usage and the account's 5h/weekly limit readings to a shared usage server, with /usage-report to split usage between people.",
   "userConfig": {
     "server_url": {

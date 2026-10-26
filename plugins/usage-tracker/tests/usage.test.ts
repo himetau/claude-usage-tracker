@@ -58,6 +58,8 @@ test('turns and limit moves reach the server; the report splits the window', { o
   expect((posted[0]!.body as { kind: string; input: number }).kind).toBe('turn')
   expect(text).toContain('5-hour window: account at 14%')
   expect(text).toContain('you (me)')
+  // My first turn is also the first reading, so all 14% predates tracking.
+  expect(text).toMatch(/before tracking started\s+14\.0%/)
   expect(text).toContain('partner')
   expect(store.get('queue')).toEqual([])
   console.log(text)
@@ -82,7 +84,7 @@ test('an unreachable server keeps samples queued', { options: OPTIONS }, async (
   expect((store.get('queue') as unknown[]).length).toBe(1)
 })
 
-test('solo stretches calibrate the rate and leave untracked use visible', { options: OPTIONS }, async ($, on) => {
+test('rises are credited to whoever was active, idle rises are untracked', { options: OPTIONS }, async ($, on) => {
   const lim = (pct: number) => [{ kind: 'five_hour', pct, resetsAt: RESET5 }]
   const row = (client: string, at: string, data: object) =>
     JSON.stringify({ received_at: at, client, data: { v: 1, ts: at, ...data } })
@@ -100,6 +102,9 @@ test('solo stretches calibrate the rate and leave untracked use visible', { opti
   const { text } = await $.command.run({ command: 'usage-report', args: '' })
   console.log(text)
   expect(text).toContain('account at 30%')
-  expect(text).toContain('calibrated from solo periods')
-  expect(text).toMatch(/untracked \(chat, other\)\s+~ 20\.0%/)
+  // 10 before tracking; +4 while only I worked; +6 while only partner worked; +10 while nobody tracked was.
+  expect(text).toMatch(/you\s+~  4\.0%/)
+  expect(text).toMatch(/partner\s+~  6\.0%/)
+  expect(text).toMatch(/untracked \(chat, other\)\s+~ 10\.0%/)
+  expect(text).toMatch(/before tracking started\s+10\.0%/)
 })

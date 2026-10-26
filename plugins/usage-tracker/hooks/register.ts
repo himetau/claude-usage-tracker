@@ -204,63 +204,74 @@ function report(rows: Row[], me: string, now: number, pending: number): string {
     const inWindow = rows.filter(r => r.data.kind === 'turn' && ts(r) >= start)
 
     const used = new Map<string, number>()
-    for (const r of inWindow) used.set(r.client, (used.get(r.client) ?? 0) + weight(r.data))
-    const total = [...used.values()].reduce((a, b) => a + b, 0)
+    for (const r of inWindow) used.set(r.client, (used.get(r.client) ?? 0) + tokensOf(r.data))
 
-    // Calibrate %-per-weighted-token from stretches where only one client
-    // reported tokens between two readings of the same window.
-    const rate = calibrate(rows, kind)
     const share = new Map<string, number>()
-    let method: string
-    if (rate !== undefined) {
-      for (const [c, w] of used) share.set(c, w * rate)
-      const sum = [...share.values()].reduce((a, b) => a + b, 0)
-      if (sum > latest.pct && sum > 0) for (const [c, v] of share) share.set(c, (v * latest.pct) / sum)
-      method = 'calibrated from solo periods'
-    } else {
-      for (const [c, w] of used) share.set(c, total > 0 ? (w / total) * latest.pct : 0)
-      method = 'no solo periods yet: split by token share, assumes no untracked use'
+    let untracked = 0
+    for (const e of attribute(rows, kind)) {
+      if (latest.resetsAt ? !sameWindow(e.resetsAt, latest.resetsAt) : e.t < start) continue
+      for (const [c, v] of e.by) share.set(c, (share.get(c) ?? 0) + v)
+      untracked += e.untracked
     }
-    const attributed = [...share.values()].reduce((a, b) => a + b, 0)
+    // Readings can dip and recover, so credited rises may slightly exceed the
+    // current figure; scale down to it.
+    const credited = [...share.values()].reduce((a, b) => a + b, 0) + untracked
+    if (credited > latest.pct && credited > 0) {
+      const k = latest.pct / credited
+      for (const [c, v] of share) share.set(c, v * k)
+      untracked *= k
+    }
+    const before = Math.max(0, latest.pct - Math.min(credited, latest.pct))
 
     const reset = latest.resetsAt ? `, resets ${new Date(resetsAt).toISOString().replace('T', ' ').slice(0, 16)} UTC` : ''
     out.push(`${title}: account at ${latest.pct}%${reset}`)
-    const clients = [...new Set([me, ...used.keys()])]
-    for (const c of clients) {
-      const tokens = inWindow.filter(r => r.client === c).reduce((a, r) => a + (r.data.input ?? 0) + (r.data.output ?? 0) + (r.data.cache_read ?? 0) + (r.data.cache_write ?? 0), 0)
-      out.push(`  ${label(c).padEnd(24)} ~${(share.get(c) ?? 0).toFixed(1).padStart(5)}%   ${fmt(tokens)} tokens`)
+    for (const c of new Set([me, ...used.keys(), ...share.keys()])) {
+      out.push(`  ${label(c).padEnd(24)} ~${(share.get(c) ?? 0).toFixed(1).padStart(5)}%   ${fmt(used.get(c) ?? 0)} tokens`)
     }
-    out.push(`  ${'untracked (chat, other)'.padEnd(24)} ~${Math.max(0, latest.pct - attributed).toFixed(1).padStart(5)}%`)
-    out.push(`  (${method})`)
+    out.push(`  ${'untracked (chat, other)'.padEnd(24)} ~${untracked.toFixed(1).padStart(5)}%`)
+    if (before > 0.05) out.push(`  ${'before tracking started'.padEnd(24)}  ${before.toFixed(1).padStart(5)}%`)
     out.push('')
   }
+  out.push('Each rise in the limit is credited to whoever was using Claude Code at the time,')
+  out.push('split by tokens if several were; rises with no tracked activity are untracked.')
   if (pending > 0) out.push(`${pending} sample(s) from this machine not yet delivered to the server.`)
   return out.join('\n').trimEnd()
 }
 
-function calibrate(rows: Row[], kind: string): number | undefined {
-  let sumPct = 0
-  let sumW = 0
+// Two readings belong to the same window when their reset times agree
+// (allowing for a little jitter); a new window resets hours later.
+function sameWindow(a: string | undefined, b: string | undefined): boolean {
+  return a !== undefined && b !== undefined && Math.abs(Date.parse(a) - Date.parse(b)) < 10 * 60e3
+}
+
+type Rise = { t: number; resetsAt?: string; by: Map<string, number>; untracked: number }
+
+// Walks one limit's readings in time order. Each rise between two readings is
+// credited to whoever reported turns in between, split by cost-weighted tokens
+// when several did; a rise with no tracked turns is untracked. The very first
+// reading only sets the baseline: usage before tracking can't be attributed.
+function attribute(rows: Row[], kind: string): Rise[] {
+  const rises: Rise[] = []
   let prev: Limit | undefined
   let tokens = new Map<string, number>()
   for (const r of rows) {
     if (r.data.kind === 'turn') tokens.set(r.client, (tokens.get(r.client) ?? 0) + weight(r.data))
     const l = r.data.limits.find(x => x.kind === kind)
     if (!l) continue
-    if (prev && prev.resetsAt === l.resetsAt) {
-      const delta = l.pct - prev.pct
-      const active = [...tokens.entries()].filter(([, w]) => w > 0)
-      if (delta >= 0 && active.length === 1) {
-        sumPct += delta
-        sumW += active[0]![1]
-      }
+    if (prev) {
+      const delta = sameWindow(prev.resetsAt, l.resetsAt) ? Math.max(0, l.pct - prev.pct) : l.pct
+      const total = [...tokens.values()].reduce((a, b) => a + b, 0)
+      const by = new Map<string, number>()
+      if (total > 0) for (const [c, w] of tokens) by.set(c, (delta * w) / total)
+      rises.push({ t: ts(r), resetsAt: l.resetsAt, by, untracked: total > 0 ? 0 : delta })
     }
     prev = l
     tokens = new Map()
   }
-  // Need a few whole points of movement before the rate means anything.
-  return sumPct >= 3 && sumW > 0 ? sumPct / sumW : undefined
+  return rises
 }
+
+const tokensOf = (d: Sample) => (d.input ?? 0) + (d.output ?? 0) + (d.cache_read ?? 0) + (d.cache_write ?? 0)
 
 function fmt(n: number): string {
   return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : String(n)
