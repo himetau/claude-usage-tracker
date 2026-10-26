@@ -1,0 +1,33 @@
+services:
+  usage-server:
+    image: ghcr.io/himetau/claude-usage-tracker:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      LISTEN_ADDR: ":8080"
+      DATA_FILE: /data/usage.jsonl
+      # One token per person, comma separated. Set in .env, never commit it.
+      ACCESS_TOKENS: ${ACCESS_TOKENS:?set ACCESS_TOKENS in .env}
+      MAX_BODY_BYTES: "65536"
+    ports:
+      # Bind to localhost; put a TLS reverse proxy (Caddy/Traefik/nginx) in front.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - usage-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usage-server", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  usage-data:

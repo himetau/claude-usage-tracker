@@ -1,0 +1,11 @@
+{
+  "name": "claude-usage-tracker",
+  "owner": { "name": "himetau" },
+  "plugins": [
+    {
+      "name": "usage-tracker",
+      "source": "./plugins/usage-tracker",
+      "description": "Reports this machine's Claude usage and the account's 5h/weekly limit readings to a shared usage server, with /usage-report to split usage between people."
+    }
+  ]
+}

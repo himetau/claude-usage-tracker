@@ -1,0 +1,26 @@
+{
+  "name": "usage-tracker",
+  "version": "0.1.0",
+  "description": "Reports this machine's Claude usage and the account's 5h/weekly limit readings to a shared usage server, with /usage-report to split usage between people.",
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Usage server URL",
+      "description": "Base URL of the usage server, e.g. https://usage.example.com",
+      "required": true
+    },
+    "access_token": {
+      "type": "string",
+      "title": "Access token",
+      "description": "One of the server's ACCESS_TOKENS; use a different token per person.",
+      "sensitive": true,
+      "required": true
+    },
+    "display_name": {
+      "type": "string",
+      "title": "Your name",
+      "description": "How you appear in /usage-report (optional).",
+      "default": ""
+    }
+  }
+}
